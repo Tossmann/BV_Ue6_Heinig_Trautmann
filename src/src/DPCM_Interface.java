@@ -6,6 +6,8 @@ import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.filechooser.FileNameExtensionFilter;
 
+import org.ietf.jgss.Oid;
+
 import java.awt.event.*;
 import java.awt.*;
 import java.io.File;
@@ -32,8 +34,10 @@ public class DPCM_Interface extends JPanel {
 	private ImageView reconstructedImage;
 
 	private int[] origARGB;
-	private int[] dstARGB;
-	private final String[] predictionModes = {"A", "B", "C", "A+B-C", "(A+B)/2", "adaptiv"};
+	private int[] predictionARGB;
+	private int[] reconstructedARGB;
+	
+	private final String[] predictionModes = {"A (horizontal)", "B (vertikal)", "C (diagonal)", "A+B-C", "(A+B)/2", "adaptiv"};
 	
 	public DPCM_Interface(){
 
@@ -41,8 +45,6 @@ public class DPCM_Interface extends JPanel {
 
 		// load the default image
 		File input = new File(initialFilename);
-		File pre = new File("1.png");
-		File re = new File("2.png");
 
 		if(!input.canRead()) input = openFile(); // file not found, choose another image
 
@@ -58,10 +60,13 @@ public class DPCM_Interface extends JPanel {
 		// TODO: initialize the original ARGB-Pixel array from the loaded image
 		height = inputImage.getImgHeight();
 		width = inputImage.getImgWidth();
-		origARGB = new int[width*height];
-		dstARGB = new int[width*height];
-		dstARGB = inputImage.getPixels();
-		origARGB = dstARGB.clone();
+		
+//		origARGB = new int[width*height];
+		
+		origARGB = inputImage.getPixels();
+		predictionARGB = predictionErrorImage.getPixels();
+		reconstructedARGB = reconstructedImage.getPixels();
+		grayImage();
 
 
 		// load image button
@@ -77,10 +82,10 @@ public class DPCM_Interface extends JPanel {
 					width = inputImage.getImgWidth();
 					// TODO: initialize the original ARGB-Pixel array from the newly loaded image
 					origARGB = new int[width*height];
-					dstARGB = new int[width*height];
-					dstARGB = (int[])inputImage.getPixels();
-					origARGB = dstARGB.clone();
-					frame.pack();
+					origARGB = inputImage.getPixels();
+					predictionARGB = predictionErrorImage.getPixels();
+					reconstructedARGB = reconstructedImage.getPixels();
+					grayImage();
 				}
 			}        	
 		});
@@ -105,6 +110,23 @@ public class DPCM_Interface extends JPanel {
 				
 			}       	
 		});
+		
+		ActionListener predictionActionListener = new ActionListener() {//add actionlistner to listen for change
+            @Override
+            public void actionPerformed(ActionEvent e) {
+
+                String s = (String) predictions.getSelectedItem();//get the selected item
+
+                switch (s) {//check for a match
+                    case "A (horizontal)":
+                        predictionA();
+                        break;
+                 
+                }
+            }
+        };
+
+        predictions.addActionListener(predictionActionListener);
 
 		// top view controls
 		JPanel topControls = new JPanel(new GridLayout(0, 3, 10, 0));
@@ -172,4 +194,54 @@ public class DPCM_Interface extends JPanel {
 			}
 		});
 	}
+	
+	public void grayImage(){
+		for(int x = 0; x < origARGB.length-1; x++){
+				int grayValue = ((origARGB[x] & 0xFF) + ((origARGB[x]>>16) & 0xFF) + ((origARGB[x]>>8) & 0xFF))/3;
+				origARGB[x] = (0xFF<<24) | (grayValue<<16) | (grayValue<<8) | grayValue;
+		}
+		predictionErrorImage.setPixels(origARGB);
+		reconstructedImage.setPixels(origARGB);
+		
+		inputImage.applyChanges();
+		predictionErrorImage.applyChanges();
+		reconstructedImage.applyChanges();
+	}
+	
+	public void predictionA(){
+		int [] actualPixels = new int[4];		
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				actualPixels = getSurrounded(x, y).clone();
+				int error = putInRange(actualPixels[0] - actualPixels[1] + 128);
+				predictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+			}
+		}
+		predictionErrorImage.applyChanges();
+	}
+	
+	public int[] getSurrounded(int x, int y){
+		int[] pixels = new int[4];
+		pixels[0] = (origARGB[y*width+x] & 0xFF);
+		
+		if(x == 0){
+			pixels[1] = 128;
+				if(y == 0) pixels[3] = 128;
+		}
+		else if(y == 0) pixels[2] = 128;
+		else{
+			pixels[0] = (origARGB[y*width+x] & 0xFF);
+			pixels[1] = (origARGB[(y*width+(x-1))] & 0xFF);
+			pixels[2] = (origARGB[((y-1)*width+x)] & 0xFF);
+			pixels[3] = (origARGB[((y-1)*width+(x-1))] & 0xFF);
+		}
+		return pixels;
+	}
+	
+	private int putInRange(int colorValue) {
+		if(colorValue<0)colorValue = 0;
+		if(colorValue>255)colorValue = 255;
+		return colorValue;
+	} 
 }
