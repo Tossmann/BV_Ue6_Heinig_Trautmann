@@ -11,6 +11,7 @@ import org.ietf.jgss.Oid;
 import java.awt.event.*;
 import java.awt.*;
 import java.io.File;
+import java.text.DecimalFormat;
 import java.util.Arrays;
 
 public class DPCM_Interface extends JPanel {
@@ -22,7 +23,7 @@ public class DPCM_Interface extends JPanel {
 	private static final int border = 10;
 	private static final int maxWidth = 910; 
 	private static final int maxHeight = 910; 
-	private static final int graySteps = 256;
+
 
 	private static int width;
 	private static int height;
@@ -35,19 +36,25 @@ public class DPCM_Interface extends JPanel {
 
 	private int[] origARGB;
 	private int[] predictionARGB;
+	private int[] origPredictionARGB;
 	private int[] reconstructedARGB;
-	
+
 	private int[] histogramOrig = new int[256];
 	private int[] histogramPred = new int[256];
 	private int[] histogramReco = new int[256];
-	
+
+	JLabel inputImageLabel;
+	JLabel predictionErrorImageLabel;
+	JLabel reconstructedImageLabel;
+
+	JSlider quantisizeSlider;
 	/*
 	 * 
 	 * 
 	 */
-	
-	private final String[] predictionModes = {"A (horizontal)", "B (vertikal)", "C (diagonal)", "A+B-C", "(A+B)/2", "adaptiv"};
-	
+
+	private final String[] predictionModes = {"Original","A (horizontal)", "B (vertikal)", "C (diagonal)", "A+B-C", "(A+B)/2", "adaptiv"};
+
 	public DPCM_Interface(){
 
 		super(new BorderLayout(border, border));
@@ -58,48 +65,27 @@ public class DPCM_Interface extends JPanel {
 		if(!input.canRead()) input = openFile(); // file not found, choose another image
 
 		inputImage = new ImageView(input);
-		inputImage.setMaxSize(new Dimension(maxWidth, maxHeight));
-		
+		//	inputImage.setMaxSize(new Dimension());
+
 		predictionErrorImage = new ImageView(input);
 		predictionErrorImage.setMaxSize(new Dimension(maxWidth, maxHeight));
-		
+
 		reconstructedImage = new ImageView(input);
 		reconstructedImage.setMaxSize(new Dimension(maxWidth, maxHeight));
 
 		// TODO: initialize the original ARGB-Pixel array from the loaded image
 		height = inputImage.getImgHeight();
 		width = inputImage.getImgWidth();
-		
-//		origARGB = new int[width*height];
-		
+
+		//		origARGB = new int[width*height];
+
 		origARGB = inputImage.getPixels();
 		predictionARGB = predictionErrorImage.getPixels();
+		origPredictionARGB = predictionARGB.clone();
 		reconstructedARGB = reconstructedImage.getPixels();
 		grayImage();
-
-		for(int x = 0; x < width; x++){
-			for(int y = 0; y < height; y++){
-				int pos = y*width+x;
-				int grayValue = (origARGB[pos] & 0xFF);
-				histogramOrig[grayValue]++;
-			}
-		}
-		
-		for(int x = 0; x < width; x++){
-			for(int y = 0; y < height; y++){
-				int pos = y*width+x;
-				int grayValue = (predictionARGB[pos] & 0xFF);
-				histogramPred[grayValue]++;
-			}
-		}
-		
-		for(int x = 0; x < width; x++){
-			for(int y = 0; y < height; y++){
-				int pos = y*width+x;
-				int grayValue = (reconstructedARGB[pos] & 0xFF);
-				reconstructedARGB[grayValue]++;
-			}
-		}
+		updateHistogram();
+		resetPrediction();
 
 		// load image button
 		JButton load = new JButton("Open Image");
@@ -118,6 +104,9 @@ public class DPCM_Interface extends JPanel {
 					predictionARGB = predictionErrorImage.getPixels();
 					reconstructedARGB = reconstructedImage.getPixels();
 					grayImage();
+					updateHistogram();
+					updateEntropie();
+					resetPrediction();
 				}
 			}        	
 		});
@@ -127,73 +116,103 @@ public class DPCM_Interface extends JPanel {
 		//	statusLine = new JLabel(" ");
 
 		JComboBox<String> predictions = new JComboBox<String>(predictionModes);
-		JSlider quantisizeSlider = new JSlider(10, 1000, 10);
+		quantisizeSlider = new JSlider(10, 1000, 10);
 		double quantisize = quantisizeSlider.getValue()*1.0/10;
 		String quantisizeText = "Quantisize: " +quantisize;
 		TitledBorder titBorderQuantisize = BorderFactory.createTitledBorder(quantisizeText);
 		quantisizeSlider.setBorder(titBorderQuantisize);
-		
+
 		quantisizeSlider.addChangeListener(new ChangeListener() {
 			public void stateChanged(ChangeEvent e) {
 				double quantisize = quantisizeSlider.getValue()/10.0;
 				String quantisizeText = "Quantisize: " + quantisize;
 				TitledBorder titBorderQuantisize = BorderFactory.createTitledBorder(quantisizeText);
 				quantisizeSlider.setBorder(titBorderQuantisize);
-				
+				quantisize();
 			}       	
 		});
-		
+
 		ActionListener predictionActionListener = new ActionListener() {//add actionlistner to listen for change
-            @Override
-            public void actionPerformed(ActionEvent e) {
+			@Override
+			public void actionPerformed(ActionEvent e) {
 
-                String s = (String) predictions.getSelectedItem();//get the selected item
+				String s = (String) predictions.getSelectedItem();//get the selected item
 
-                switch (s) {//check for a match
-                    case "A (horizontal)":
-                        predictionA();
-                        break;
-                    case "B (vertikal)":
-                        predictionB();
-                        break;
-                    case "C (diagonal)":
-                    	predictionC();
-                    	break;
-                    case "A+B-C":
-                		predictionAplusBminusC();
-                		break;
-                    case "(A+B)/2":
-                    	predictionAplusBdivideByTwo();
-                		break;
-                    case "adaptiv":
-                		adaptiv();
-                		break;
-                }
-            }
-        };
+				switch (s) {//check for a match
+				case "Original":
+					resetPrediction();
+					updateHistogram();
+					updateEntropie();
+					break;
+				case "A (horizontal)":
+					predictionA();
+					updateHistogram();
+					updateEntropie();
+					break;
+				case "B (vertikal)":
+					predictionB();
+					updateHistogram();
+					updateEntropie();
+					break;
+				case "C (diagonal)":
+					predictionC();
+					updateHistogram();
+					updateEntropie();
+					break;
+				case "A+B-C":
+					predictionAplusBminusC();
+					updateHistogram();
+					updateEntropie();
+					break;
+				case "(A+B)/2":
+					predictionAplusBdivideByTwo();
+					updateHistogram();
+					updateEntropie();
+					break;
+				case "adaptiv":
+					adaptiv();
+					updateHistogram();
+					updateEntropie();
+					break;
+				}
+			}
+		};
 
-        predictions.addActionListener(predictionActionListener);
+		predictions.addActionListener(predictionActionListener);
 
 		// top view controls
 		JPanel topControls = new JPanel(new GridLayout(0, 3, 10, 0));
-		
+
 		topControls.add(load);
 		topControls.add(predictions);
 		topControls.add(quantisizeSlider);
-		
+
 
 		// center view
 		JPanel centerControls = new JPanel(new GridLayout(0, 3, 10, 0));	
-		
+		JPanel bottomControls = new JPanel(new GridLayout(0, 3, 10, 0));
+
+		inputImageLabel = new JLabel("Entropie: ");
+		predictionErrorImageLabel = new JLabel("Entropie: ");
+		reconstructedImageLabel = new JLabel("Entropie: ");
+
+		updateEntropie();
+
+		bottomControls.add(inputImageLabel);
+		bottomControls.add(predictionErrorImageLabel);
+		bottomControls.add(reconstructedImageLabel);
+
+
 		TitledBorder inputImageTitle = BorderFactory.createTitledBorder("Eingangsbild");
 		inputImage.setBorder(inputImageTitle);
-		
+
+
 		TitledBorder predictionErrorImageTitle = BorderFactory.createTitledBorder("Prädiktionsfehlerbild");
 		predictionErrorImage.setBorder(predictionErrorImageTitle);
-		
+
 		TitledBorder reconstructedImageTitle = BorderFactory.createTitledBorder("Rekonstruiertes Bild");
 		reconstructedImage.setBorder(reconstructedImageTitle);
-		
+
 		centerControls.add(inputImage);
 		centerControls.add(predictionErrorImage);
 		centerControls.add(reconstructedImage);
@@ -201,7 +220,8 @@ public class DPCM_Interface extends JPanel {
 		// add to main panel
 		add(topControls, BorderLayout.NORTH);
 		add(centerControls, BorderLayout.CENTER);
-		
+		add(bottomControls, BorderLayout.SOUTH);
+
 
 		// add border to main panel
 		setBorder(BorderFactory.createEmptyBorder(border,border,border,border));
@@ -232,7 +252,8 @@ public class DPCM_Interface extends JPanel {
 		frame.pack();
 		Toolkit toolkit = Toolkit.getDefaultToolkit();
 		Dimension screenSize = toolkit.getScreenSize();
-		frame.setLocation((screenSize.width - frame.getWidth()) / 2, (screenSize.height - frame.getHeight()) / 2);
+		frame.setLocation(100 , 100);
+		frame.setSize(screenSize.width - (screenSize.width/3), screenSize.height - (screenSize.height/2));
 		frame.setVisible(true);
 	}
 
@@ -249,20 +270,20 @@ public class DPCM_Interface extends JPanel {
 			}
 		});
 	}
-	
+
 	public void grayImage(){
 		for(int x = 0; x < origARGB.length-1; x++){
-				int grayValue = ((origARGB[x] & 0xFF) + ((origARGB[x]>>16) & 0xFF) + ((origARGB[x]>>8) & 0xFF))/3;
-				origARGB[x] = (0xFF<<24) | (grayValue<<16) | (grayValue<<8) | grayValue;
+			int grayValue = ((origARGB[x] & 0xFF) + ((origARGB[x]>>16) & 0xFF) + ((origARGB[x]>>8) & 0xFF))/3;
+			origARGB[x] = (0xFF<<24) | (grayValue<<16) | (grayValue<<8) | grayValue;
 		}
 		predictionErrorImage.setPixels(origARGB);
 		reconstructedImage.setPixels(origARGB);
-		
+
 		inputImage.applyChanges();
 		predictionErrorImage.applyChanges();
 		reconstructedImage.applyChanges();
 	}
-	
+
 	public void predictionA(){
 		int [] actualPixels = new int[4];		
 		for(int x = 0; x < width; x++){
@@ -270,12 +291,13 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange(actualPixels[1] + 128);
-				predictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
 			}
 		}
+		predictionErrorImage.setPixels(origPredictionARGB);
 		predictionErrorImage.applyChanges();
 	}
-	
+
 	private void adaptiv() {
 		int [] actualPixels = new int[4];
 		int error;
@@ -285,9 +307,10 @@ public class DPCM_Interface extends JPanel {
 				actualPixels = getSurrounded(x, y).clone();
 				if(AorB(actualPixels)) error = putInRange(actualPixels[2] + 128);
 				else error = putInRange(actualPixels[1] + 128);
-				predictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
 			}
 		}
+		predictionErrorImage.setPixels(origPredictionARGB);
 		predictionErrorImage.applyChanges();
 	}
 
@@ -298,9 +321,10 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange((actualPixels[1] + actualPixels[2]) / 2 + 128);
-				predictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
 			}
 		}
+		predictionErrorImage.setPixels(origPredictionARGB);
 		predictionErrorImage.applyChanges();
 	}
 
@@ -311,9 +335,10 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange(actualPixels[2] + 128);
-				predictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
 			}
 		}
+		predictionErrorImage.setPixels(origPredictionARGB);
 		predictionErrorImage.applyChanges();
 	}
 
@@ -324,9 +349,10 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange(actualPixels[3] + 128);
-				predictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
 			}
 		}
+		predictionErrorImage.setPixels(origPredictionARGB);
 		predictionErrorImage.applyChanges();
 	}
 
@@ -337,19 +363,32 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange(actualPixels[1] + actualPixels[2] - actualPixels[3] + 128);
-				predictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
 			}
 		}
+		predictionErrorImage.setPixels(origPredictionARGB);
 		predictionErrorImage.applyChanges();
 	}
-	
+
+	private void resetPrediction(){
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				origPredictionARGB[pos] = (0xFF<<24) | (0xFF <<16) | (0xFF <<8) | 0xFF;
+				reconstructedARGB[pos] = (0xFF<<24) | (0xFF <<16) | (0xFF <<8) | 0xFF;
+			}
+		}
+		predictionErrorImage.setPixels(origPredictionARGB);
+		predictionErrorImage.applyChanges();
+		reconstructedImage.applyChanges();
+	}
 	public int[] getSurrounded(int x, int y){
 		int[] pixels = new int[4];
 		pixels[0] = (origARGB[y*width+x] & 0xFF);
-		
+
 		if(x == 0){
 			pixels[1] = 128;
-				if(y == 0) pixels[3] = 128;
+			if(y == 0) pixels[3] = 128;
 		}
 		else if(y == 0) pixels[2] = 128;
 		else{
@@ -357,24 +396,24 @@ public class DPCM_Interface extends JPanel {
 			pixels[2] = (origARGB[((y-1)*width+x)] & 0xFF);
 			pixels[3] = (origARGB[((y-1)*width+(x-1))] & 0xFF);
 		}
-		
+
 		pixels[1] -= (origARGB[y*width+x] & 0xFF);
 		pixels[2] -= (origARGB[y*width+x] & 0xFF);
 		pixels[3] -= (origARGB[y*width+x] & 0xFF);
-		
+
 		return pixels;
 	}
-	
+
 	private int putInRange(int colorValue) {
 		if(colorValue<0)colorValue = 0;
 		if(colorValue>255)colorValue = 255;
 		return colorValue;
 	} 
-	
+
 	private boolean AorB(int[] pixels){
 		return Math.abs(pixels[1] - pixels[3]) < Math.abs(pixels[2] - pixels[3]);
 	}
-	
+
 	public double calculateEnt(int[] histogram){
 		double[] probability = new double[countEntropie(histogram)];
 		double entropy = 0.0;
@@ -402,5 +441,54 @@ public class DPCM_Interface extends JPanel {
 
 	public double getProbability(int index, int[] histogram){
 		return -((Math.log10(((double)histogram[index])/(width*height)))/Math.log10(2.0));
+	}
+
+	public void updateHistogram(){
+
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				int grayValue = (origARGB[pos] & 0xFF);
+				histogramOrig[grayValue]++;
+			}
+		}
+
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				int grayValue = (predictionARGB[pos] & 0xFF);
+				histogramPred[grayValue]++;
+			}
+		}
+
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				int grayValue = (reconstructedARGB[pos] & 0xFF);
+				histogramReco[grayValue]++;
+			}
+		}
+	}
+
+	public void updateEntropie(){
+		String ent = "Entropie: ";
+		DecimalFormat format = new DecimalFormat("###.####");
+
+		inputImageLabel.setText(ent + format.format(calculateEnt(histogramOrig)));
+		predictionErrorImageLabel.setText(ent + format.format(calculateEnt(histogramPred)));
+		reconstructedImageLabel.setText(ent + format.format(calculateEnt(histogramReco)));
+	}
+
+	private void quantisize(){
+		double delta = quantisizeSlider.getValue()/10.0;
+
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				int grayValue = putInRange((int)(Math.round(((origPredictionARGB[pos] & 0xFF)/delta))*delta));
+				predictionARGB[pos] = (0xFF<<24) | (grayValue<<16) | (grayValue<<8) | grayValue;
+			}
+		}
+		predictionErrorImage.applyChanges();
 	}
 }
