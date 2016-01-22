@@ -37,6 +37,7 @@ public class DPCM_Interface extends JPanel {
 	private int[] origARGB;
 	private int[] predictionARGB;
 	private int[] origPredictionARGB;
+	private int[] origReconstructedARGB;
 	private int[] reconstructedARGB;
 
 	private int[] histogramOrig = new int[256];
@@ -46,6 +47,7 @@ public class DPCM_Interface extends JPanel {
 	JLabel inputImageLabel;
 	JLabel predictionErrorImageLabel;
 	JLabel reconstructedImageLabel;
+	JLabel labelMSE;
 
 	JSlider quantisizeSlider;
 	/*
@@ -83,8 +85,8 @@ public class DPCM_Interface extends JPanel {
 		predictionARGB = predictionErrorImage.getPixels();
 		origPredictionARGB = predictionARGB.clone();
 		reconstructedARGB = reconstructedImage.getPixels();
+		origReconstructedARGB = reconstructedARGB.clone();
 		grayImage();
-		updateHistogram();
 		resetPrediction();
 
 		// load image button
@@ -104,9 +106,8 @@ public class DPCM_Interface extends JPanel {
 					predictionARGB = predictionErrorImage.getPixels();
 					reconstructedARGB = reconstructedImage.getPixels();
 					grayImage();
-					updateHistogram();
-					updateEntropie();
 					resetPrediction();
+					processImage();
 				}
 			}        	
 		});
@@ -129,6 +130,7 @@ public class DPCM_Interface extends JPanel {
 				TitledBorder titBorderQuantisize = BorderFactory.createTitledBorder(quantisizeText);
 				quantisizeSlider.setBorder(titBorderQuantisize);
 				quantisize();
+				processImage();
 			}       	
 		});
 
@@ -141,38 +143,31 @@ public class DPCM_Interface extends JPanel {
 				switch (s) {//check for a match
 				case "Original":
 					resetPrediction();
-					updateHistogram();
-					updateEntropie();
+					processImage();
 					break;
 				case "A (horizontal)":
 					predictionA();
-					updateHistogram();
-					updateEntropie();
+					processImage();
 					break;
 				case "B (vertikal)":
 					predictionB();
-					updateHistogram();
-					updateEntropie();
+					processImage();
 					break;
 				case "C (diagonal)":
 					predictionC();
-					updateHistogram();
-					updateEntropie();
+					processImage();
 					break;
 				case "A+B-C":
 					predictionAplusBminusC();
-					updateHistogram();
-					updateEntropie();
+					processImage();
 					break;
 				case "(A+B)/2":
 					predictionAplusBdivideByTwo();
-					updateHistogram();
-					updateEntropie();
+					processImage();
 					break;
 				case "adaptiv":
 					adaptiv();
-					updateHistogram();
-					updateEntropie();
+					processImage();
 					break;
 				}
 			}
@@ -195,14 +190,17 @@ public class DPCM_Interface extends JPanel {
 		inputImageLabel = new JLabel("Entropie: ");
 		predictionErrorImageLabel = new JLabel("Entropie: ");
 		reconstructedImageLabel = new JLabel("Entropie: ");
-
-		updateEntropie();
+		labelMSE = new JLabel("MSE: " + calcMSE());
+		JLabel freeSpace = new JLabel();
+		JLabel freeSpace2 = new JLabel();
+		processImage();
 
 		bottomControls.add(inputImageLabel);
 		bottomControls.add(predictionErrorImageLabel);
 		bottomControls.add(reconstructedImageLabel);
-
-
+		bottomControls.add(freeSpace);
+		bottomControls.add(freeSpace2);
+		bottomControls.add(labelMSE);
 		TitledBorder inputImageTitle = BorderFactory.createTitledBorder("Eingangsbild");
 		inputImage.setBorder(inputImageTitle);
 
@@ -278,10 +276,6 @@ public class DPCM_Interface extends JPanel {
 		}
 		predictionErrorImage.setPixels(origARGB);
 		reconstructedImage.setPixels(origARGB);
-
-		inputImage.applyChanges();
-		predictionErrorImage.applyChanges();
-		reconstructedImage.applyChanges();
 	}
 
 	public void predictionA(){
@@ -291,11 +285,12 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange(actualPixels[1] + 128);
-				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origReconstructedARGB[pos] = actualPixels[1];
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;					
 			}
 		}
 		predictionErrorImage.setPixels(origPredictionARGB);
-		predictionErrorImage.applyChanges();
+		createRecounstructedA();
 	}
 
 	private void adaptiv() {
@@ -305,13 +300,21 @@ public class DPCM_Interface extends JPanel {
 			for(int y = 0; y < height; y++){
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
-				if(AorB(actualPixels)) error = putInRange(actualPixels[2] + 128);
-				else error = putInRange(actualPixels[1] + 128);
+				if(AorB(actualPixels))
+				{
+					error = putInRange(actualPixels[2] + 128);
+					origReconstructedARGB[pos] = actualPixels[2];
+				}
+				else
+				{ 
+					error = putInRange(actualPixels[1] + 128);
+					origReconstructedARGB[pos] = actualPixels[1];
+				}
 				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
 			}
 		}
 		predictionErrorImage.setPixels(origPredictionARGB);
-		predictionErrorImage.applyChanges();
+		createRecounstructedAdaptiv();
 	}
 
 	private void predictionAplusBdivideByTwo() {
@@ -320,12 +323,14 @@ public class DPCM_Interface extends JPanel {
 			for(int y = 0; y < height; y++){
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
-				int error = putInRange((actualPixels[1] + actualPixels[2]) / 2 + 128);
-				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				int error = (actualPixels[1] + actualPixels[2]) / 2;
+				origReconstructedARGB[pos] = error;
+				error = putInRange(error + 128);
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;					
 			}
 		}
 		predictionErrorImage.setPixels(origPredictionARGB);
-		predictionErrorImage.applyChanges();
+		createRecounstructedAplusBdividedByTwo();
 	}
 
 	private void predictionB() {
@@ -335,11 +340,12 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange(actualPixels[2] + 128);
-				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;
+				origReconstructedARGB[pos] = actualPixels[2];
 			}
 		}
 		predictionErrorImage.setPixels(origPredictionARGB);
-		predictionErrorImage.applyChanges();
+		createRecounstructedB();
 	}
 
 	private void predictionC() {
@@ -349,11 +355,12 @@ public class DPCM_Interface extends JPanel {
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
 				int error = putInRange(actualPixels[3] + 128);
-				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;	
+				origReconstructedARGB[pos] = actualPixels[3];
 			}
 		}
 		predictionErrorImage.setPixels(origPredictionARGB);
-		predictionErrorImage.applyChanges();
+		createRecounstructedC();
 	}
 
 	private void predictionAplusBminusC() {
@@ -362,36 +369,35 @@ public class DPCM_Interface extends JPanel {
 			for(int y = 0; y < height; y++){
 				int pos = y*width+x;
 				actualPixels = getSurrounded(x, y).clone();
-				int error = putInRange(actualPixels[1] + actualPixels[2] - actualPixels[3] + 128);
-				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+				int error = actualPixels[1] + actualPixels[2] - actualPixels[3];
+				origReconstructedARGB[pos] = error;
+				error = putInRange(error + 128);
+				origPredictionARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;	
 			}
 		}
 		predictionErrorImage.setPixels(origPredictionARGB);
-		predictionErrorImage.applyChanges();
+		createRecounstructedAplusBminusC();
 	}
 
 	private void resetPrediction(){
 		for(int x = 0; x < width; x++){
 			for(int y = 0; y < height; y++){
 				int pos = y*width+x;
-				origPredictionARGB[pos] = (0xFF<<24) | (0xFF <<16) | (0xFF <<8) | 0xFF;
-				reconstructedARGB[pos] = (0xFF<<24) | (0xFF <<16) | (0xFF <<8) | 0xFF;
+				origPredictionARGB[pos] = (0xFF<<24) | (0x00 <<16) | (0x00 <<8) | 0x00;
+				reconstructedARGB[pos] = (0xFF<<24) | (0x00 <<16) | (0x00 <<8) | 0x00;
 			}
 		}
 		predictionErrorImage.setPixels(origPredictionARGB);
-		predictionErrorImage.applyChanges();
-		reconstructedImage.applyChanges();
 	}
 	public int[] getSurrounded(int x, int y){
 		int[] pixels = new int[4];
 		pixels[0] = (origARGB[y*width+x] & 0xFF);
 
-		if(x == 0){
-			pixels[1] = 128;
-			if(y == 0) pixels[3] = 128;
-		}
-		else if(y == 0) pixels[2] = 128;
-		else{
+		if(x == 0)pixels[1] = 128;
+		if(y == 0 || x == 0) pixels[3] = 128;
+		if(y == 0) pixels[2] = 128;
+		if(x > 0 && y > 0)
+		{
 			pixels[1] = (origARGB[(y*width+(x-1))] & 0xFF);
 			pixels[2] = (origARGB[((y-1)*width+x)] & 0xFF);
 			pixels[3] = (origARGB[((y-1)*width+(x-1))] & 0xFF);
@@ -445,6 +451,10 @@ public class DPCM_Interface extends JPanel {
 
 	public void updateHistogram(){
 
+		Arrays.fill(histogramOrig, 0);
+		Arrays.fill(histogramPred, 0);
+		Arrays.fill(histogramReco, 0);
+
 		for(int x = 0; x < width; x++){
 			for(int y = 0; y < height; y++){
 				int pos = y*width+x;
@@ -489,6 +499,106 @@ public class DPCM_Interface extends JPanel {
 				predictionARGB[pos] = (0xFF<<24) | (grayValue<<16) | (grayValue<<8) | grayValue;
 			}
 		}
+	}
+
+	private void createRecounstructedA(){
+		int [] actualPixels = new int[4];		
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				actualPixels = getSurrounded(x, y).clone();
+				int error = putInRange((actualPixels[1]+actualPixels[0]) - origReconstructedARGB[pos]);
+				reconstructedARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+			}
+		}
+	}
+
+	private void createRecounstructedB(){
+		int [] actualPixels = new int[4];		
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				actualPixels = getSurrounded(x, y).clone();
+				int error = putInRange((actualPixels[2] + actualPixels[0]) - origReconstructedARGB[pos]);
+				reconstructedARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+			}
+		}
+	}
+
+	private void createRecounstructedC(){
+		int [] actualPixels = new int[4];		
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				actualPixels = getSurrounded(x, y).clone();
+				int error = putInRange((actualPixels[3]+actualPixels[0]) - origReconstructedARGB[pos]);
+				reconstructedARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+			}
+		}
+	}
+
+	private void createRecounstructedAplusBminusC(){
+		int [] actualPixels = new int[4];		
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				actualPixels = getSurrounded(x, y).clone();
+				int error = putInRange(((actualPixels[1]+actualPixels[0])+(actualPixels[2]+actualPixels[0])-(actualPixels[3]+actualPixels[0])) - origReconstructedARGB[pos]);
+				reconstructedARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+			}
+		}
+	}
+
+	private void createRecounstructedAplusBdividedByTwo(){
+		int [] actualPixels = new int[4];		
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				actualPixels = getSurrounded(x, y).clone();
+				int error = putInRange((((actualPixels[1]+actualPixels[0]) + (actualPixels[2]+actualPixels[0]))/2) - origReconstructedARGB[pos]);
+				reconstructedARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+			}
+		}
+	}
+
+
+	private void createRecounstructedAdaptiv(){
+		int [] actualPixels = new int[4];		
+		for(int x = 0; x < width; x++){
+			for(int y = 0; y < height; y++){
+				int pos = y*width+x;
+				actualPixels = getSurrounded(x, y).clone();
+				int error = 0;
+				if(AorB(actualPixels))	error = putInRange((actualPixels[2]+actualPixels[0]) - origReconstructedARGB[pos]);
+				else error = putInRange((actualPixels[1]+actualPixels[0]) - origReconstructedARGB[pos]);
+				reconstructedARGB[pos] = (0xFF<<24) | (error <<16) | (error <<8) | error;				
+			}
+		}
+	}
+	private void processImage(){
 		predictionErrorImage.applyChanges();
+		inputImage.applyChanges();
+		reconstructedImage.applyChanges();
+		updateHistogram();
+		updateEntropie();
+		updateMSE();
+	}
+	
+	private double calcMSE(){
+		int pixelAmount = width*height;
+		double actualMSE = 0;
+		
+		for(int x = 0; x < width; x++ ){
+			for(int y = 0; y < height; y++){
+				int pos = y *width +x;
+				actualMSE += Math.pow((origARGB[pos] & 0xFF) - (reconstructedARGB[pos] & 0xFF),2);
+			}
+		}		
+		return actualMSE * (1.0/pixelAmount);
+	}
+	
+	private void updateMSE(){
+		DecimalFormat format = new DecimalFormat("###.####");
+		labelMSE.setText("MSE: " + format.format(calcMSE()));
 	}
 }
